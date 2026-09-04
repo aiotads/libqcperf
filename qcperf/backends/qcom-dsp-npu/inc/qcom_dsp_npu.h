@@ -58,4 +58,19 @@ struct QcPerfBackendPrivate;
  */
 enum QcPerfReturnCode qcperf_dsp_npu_create(struct QcPerfBackendPrivate* backend);
 
+/**
+ * @brief Select which NSP this process monitors, before connecting the backend.
+ *
+ * The backend keeps a single set of session state, so one process monitors one
+ * NSP. Call this before qcperf_connect_backend(QC_PERF_BACKEND_DSP_NPU, ...);
+ * calling it afterwards has no effect until the backend is reconnected.
+ *
+ * @param[in] npu_index 0 for NPU0 (cdsp), 1 for NPU1 (cdsp1)
+ *
+ * @return QC_PERF_RETURN_CODE_SUCCESS on success
+ * @return QC_PERF_RETURN_CODE_INVALID_ARGUMENTS if npu_index is not 0 or 1
+ */
+__attribute__((visibility("default")))
+enum QcPerfReturnCode qcperf_dsp_npu_select(unsigned int npu_index);
+
 #endif /* QCOM_DSP_NPU_H */

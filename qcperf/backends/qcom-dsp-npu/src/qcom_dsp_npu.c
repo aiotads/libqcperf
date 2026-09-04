@@ -61,6 +61,23 @@ static volatile bool g_is_thread_running = false;
 static struct QThreadInfo g_thread_info  = {0};
 static bool g_is_dsp_initialized         = false;
 
+/* Which NSP this process monitors. Set via qcperf_dsp_npu_select() before
+   connecting; the backend holds one session, so one process = one NSP. */
+static enum DspDomainId g_dsp_domain = DSP_NPU0;
+
+__attribute__((visibility("default")))
+enum QcPerfReturnCode qcperf_dsp_npu_select(unsigned int npu_index) {
+    enum QcPerfReturnCode ret = QC_PERF_RETURN_CODE_SUCCESS;
+    if (npu_index == 0u) {
+        g_dsp_domain = DSP_NPU0;
+    } else if (npu_index == 1u) {
+        g_dsp_domain = DSP_NPU1;
+    } else {
+        ret = QC_PERF_RETURN_CODE_INVALID_ARGUMENTS;
+    }
+    return ret;
+}
+
 static inline void send_message(enum QcPerfMessageLevel level, const char* fmt, ...);
 static enum QcPerfReturnCode dsp_npu_alloc(void);
 static void dsp_npu_free(void);
@@ -99,7 +116,7 @@ static enum QcPerfReturnCode dsp_npu_init(void) {
     g_backend_info.backend_id = QC_PERF_BACKEND_DSP_NPU;
 
     // Initialize DSP library
-    enum DspReturnCode dsp_ret = qcom_dsp_init(DSP_NPU0);
+    enum DspReturnCode dsp_ret = qcom_dsp_init(g_dsp_domain);
     if (dsp_ret != RETURN_CODE_DSP_LIB_SUCCESS) {
         if(dsp_ret == RETURN_CODE_DSP_REMOTE_SESSION_CONTROL_FAILED) {
             SEND_MESSAGE(QC_PERF_MESSAGE_LEVEL_ERROR, "Remote session control failed for DSP NPU: error code %d", dsp_ret);
@@ -142,7 +159,7 @@ static enum QcPerfReturnCode dsp_npu_init(void) {
             SEND_MESSAGE(QC_PERF_MESSAGE_LEVEL_ERROR, "Failed to initialize DSP NPU backend: memory allocation failed");
             dsp_npu_free();
             if (g_is_dsp_initialized) {
-                qcom_dsp_deinit(DSP_NPU0);
+                qcom_dsp_deinit(g_dsp_domain);
                 g_is_dsp_initialized = false;
             }
         }
@@ -329,7 +346,7 @@ static enum QcPerfReturnCode dsp_npu_deinit(void) {
     dsp_npu_free();
 
     if (g_is_dsp_initialized) {
-        enum DspReturnCode dsp_ret = qcom_dsp_deinit(DSP_NPU0);
+        enum DspReturnCode dsp_ret = qcom_dsp_deinit(g_dsp_domain);
         if (dsp_ret != RETURN_CODE_DSP_LIB_SUCCESS) {
             SEND_MESSAGE(QC_PERF_MESSAGE_LEVEL_ERROR, "Failed to deinitialize DSP library: error code %d", dsp_ret);
         }
@@ -439,7 +456,7 @@ static void* get_dsp_npu_data(void* param) {
                         get_time_ns(&current_time);
 
                         // Get data from DSP library
-                        struct sysmon_query_prof_data* prof_data = qcom_dsp_get_prof_data(DSP_NPU0, &no_metrics);
+                        struct sysmon_query_prof_data* prof_data = qcom_dsp_get_prof_data(g_dsp_domain, &no_metrics);
 
                         if (prof_data != NULL && no_metrics> 0) {
                             // Populate metrics from DSP data

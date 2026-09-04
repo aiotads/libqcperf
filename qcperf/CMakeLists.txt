@@ -81,6 +81,11 @@ add_subdirectory(backends)
 add_subdirectory(utils)
 add_subdirectory(test_app)
 
+# Local addition: NSP sampler used by the qprof monitor script.
+if(QCPERF_ENABLED_QCOM_LINUX_NPU)
+    add_subdirectory(tools/npu_sampler)
+endif()
+
 # ============================================================================
 # Configuration summary
 # ============================================================================
