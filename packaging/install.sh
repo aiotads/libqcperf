@@ -18,26 +18,26 @@ fi
 
 echo "==> Installing to ${PREFIX}"
 install -d "${PREFIX}/bin" "${PREFIX}/lib"
-install -m 0755 "${SRC_DIR}/bin/qcperf-npu-sample" "${PREFIX}/bin/"
+install -m 0755 "${SRC_DIR}/bin/qcperf" "${PREFIX}/bin/"
 install -m 0644 "${SRC_DIR}/lib/libqcperfCore.so"  "${PREFIX}/lib/"
 
 if [ -d "$LINK_DIR" ] && [ -w "$LINK_DIR" ]; then
-    ln -sf "${PREFIX}/bin/qcperf-npu-sample" "${LINK_DIR}/qcperf-npu-sample"
-    echo "==> Linked ${LINK_DIR}/qcperf-npu-sample"
+    ln -sf "${PREFIX}/bin/qcperf" "${LINK_DIR}/qcperf"
+    echo "==> Linked ${LINK_DIR}/qcperf"
 else
     echo "==> ${LINK_DIR} not writable, skipping symlink"
 fi
 
 echo "==> Verifying against NPU0"
-if ! "${PREFIX}/bin/qcperf-npu-sample" 0 2 >/dev/null; then
+if ! "${PREFIX}/bin/qcperf" 0 2 >/dev/null; then
     echo "Error: sampler failed on NPU0. Check that" >&2
     echo "  /usr/lib/dsp/cdsp/libsysmonquery_skel.so and /dev/fastrpc-cdsp exist." >&2
     exit 1
 fi
 echo "==> Verifying against NPU1"
-if ! "${PREFIX}/bin/qcperf-npu-sample" 1 2 >/dev/null; then
+if ! "${PREFIX}/bin/qcperf" 1 2 >/dev/null; then
     echo "Error: sampler failed on NPU1. Check /usr/lib/dsp/cdsp1/ and /dev/fastrpc-cdsp1." >&2
     exit 1
 fi
 
-echo "==> Install OK: $(command -v qcperf-npu-sample || echo "${PREFIX}/bin/qcperf-npu-sample")"
+echo "==> Install OK: $(command -v qcperf || echo "${PREFIX}/bin/qcperf")"

@@ -30,7 +30,7 @@ cmake --build "$BUILD_DIR" -j"$(nproc)" >/dev/null
 
 echo "==> Staging"
 install -d "${STAGE_DIR}/${PKG_NAME}/bin" "${STAGE_DIR}/${PKG_NAME}/lib"
-install -m 0755 "${BUILD_DIR}/qcperf-npu-sample" "${STAGE_DIR}/${PKG_NAME}/bin/"
+install -m 0755 "${BUILD_DIR}/qcperf" "${STAGE_DIR}/${PKG_NAME}/bin/"
 install -m 0644 "${BUILD_DIR}/libqcperfCore.so"  "${STAGE_DIR}/${PKG_NAME}/lib/"
 install -m 0755 "${SRC_DIR}/packaging/install.sh" "${STAGE_DIR}/${PKG_NAME}/"
 

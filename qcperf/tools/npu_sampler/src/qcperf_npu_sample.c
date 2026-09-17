@@ -1,5 +1,5 @@
 /*
- * qcperf-npu-sample - one-shot NSP utilization sampler built on libqcperf.
+ * qcperf - one-shot NSP utilization sampler built on libqcperf (was qcperf-npu-sample).
  *
  * Averages the DSP NPU metrics over a fixed window and prints them as
  * KEY=VALUE lines, so shell monitors can consume it without parsing the
@@ -62,7 +62,7 @@ static enum QcPerfReturnCode message_callback(struct QcPerfMessage* message) {
     /* Only surface real problems; INFO/DEBUG would pollute the KEY=VALUE output. */
     if (NULL != message && NULL != message->message &&
         message->message_level == QC_PERF_MESSAGE_LEVEL_ERROR) {
-        fprintf(stderr, "[qcperf-npu-sample] %s\n", message->message);
+        fprintf(stderr, "[qcperf] %s\n", message->message);
     }
     return QC_PERF_RETURN_CODE_SUCCESS;
 }
@@ -102,26 +102,26 @@ int main(int argc, char** argv) {
 
     rc = qcperf_dsp_npu_select((unsigned int)npu_index);
     if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf-npu-sample] invalid npu_index %d\n", npu_index);
+        fprintf(stderr, "[qcperf] invalid npu_index %d\n", npu_index);
         return EXIT_FAILURE;
     }
 
     rc = qcperf_init();
     if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf-npu-sample] qcperf_init failed: %d\n", rc);
+        fprintf(stderr, "[qcperf] qcperf_init failed: %d\n", rc);
         return EXIT_FAILURE;
     }
 
     rc = qcperf_connect_backend(QC_PERF_BACKEND_DSP_NPU, message_callback);
     if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf-npu-sample] connect NPU%d failed: %d\n", npu_index, rc);
+        fprintf(stderr, "[qcperf] connect NPU%d failed: %d\n", npu_index, rc);
         goto cleanup;
     }
     connected = true;
 
     rc = qcperf_set_data_callback(QC_PERF_BACKEND_DSP_NPU, data_callback);
     if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf-npu-sample] set_data_callback failed: %d\n", rc);
+        fprintf(stderr, "[qcperf] set_data_callback failed: %d\n", rc);
         goto cleanup;
     }
 
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
 
     rc = qcperf_start(QC_PERF_BACKEND_DSP_NPU, &request);
     if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf-npu-sample] start failed: %d "
+        fprintf(stderr, "[qcperf] start failed: %d "
                         "(sampling_rate must be 1/5/10/50/100/200)\n", rc);
         goto cleanup;
     }
@@ -153,7 +153,7 @@ cleanup:
 
     if (exit_code == EXIT_SUCCESS) {
         if (g_count[0] == 0) {
-            fprintf(stderr, "[qcperf-npu-sample] no samples collected for NPU%d "
+            fprintf(stderr, "[qcperf] no samples collected for NPU%d "
                             "(need more than %d; try a longer window)\n",
                     npu_index, WARMUP_SAMPLES);
             return EXIT_FAILURE;
