@@ -2,12 +2,12 @@
 #
 # Install the libqcperf NPU sampler.
 #
-# Default prefix is /etc/innodisk/qcperf, next to the other Innodisk BSP tools.
+# Default prefix is /opt/innodisk/qcperf.
 # /usr is read-only on these ostree images, so nothing is written there; the
 # binary carries an RPATH of $ORIGIN/../lib and needs no LD_LIBRARY_PATH.
 set -euo pipefail
 
-PREFIX="${PREFIX:-/etc/innodisk/qcperf}"
+PREFIX="${PREFIX:-/opt/innodisk/qcperf}"
 LINK_DIR="${LINK_DIR:-/usr/local/bin}"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

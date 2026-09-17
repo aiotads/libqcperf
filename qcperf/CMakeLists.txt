@@ -50,7 +50,7 @@ project(QcPerf
 # Keep CMake's direct install flow aligned with the platform package layout.
 # Callers may still override this with -DCMAKE_INSTALL_PREFIX=<path>.
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "/etc/innodisk/qcperf" CACHE PATH
+    set(CMAKE_INSTALL_PREFIX "/opt/innodisk/qcperf" CACHE PATH
         "Install path prefix, prepended onto install directories." FORCE)
 endif()
 
