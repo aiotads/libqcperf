@@ -2,13 +2,13 @@
 #
 # Install the libqcperf NPU sampler.
 #
-# Default prefix is /opt/qcom/libqcperf, matching where QualcommProfiler lives.
-# /usr is read-only on these ostree images, so nothing is written there; the
-# binary carries an RPATH of $ORIGIN/../lib and needs no LD_LIBRARY_PATH.
+# Default prefix is /usr, so the binary lands in /usr/bin and is on the default
+# PATH with no shell setup. The binary carries an RPATH of $ORIGIN/../lib, so
+# it resolves /usr/lib/libqcperfCore.so and needs no LD_LIBRARY_PATH; that
+# holds for any other prefix with the same bin/lib layout.
 set -euo pipefail
 
-PREFIX="${PREFIX:-/opt/qcom/libqcperf}"
-LINK_DIR="${LINK_DIR:-/usr/local/bin}"
+PREFIX="${PREFIX:-/usr}"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -16,17 +16,30 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+# Some ostree images mount /usr read-only. Remount it writable for the install
+# and put it back the way it was on the way out, so the script leaves no
+# lingering change to the system's mount state.
+REMOUNTED_RO_TARGET=""
+restore_mount() {
+    if [ -n "$REMOUNTED_RO_TARGET" ]; then
+        echo "==> Restoring ${REMOUNTED_RO_TARGET} to read-only"
+        mount -o remount,ro "$REMOUNTED_RO_TARGET" || true
+    fi
+}
+trap restore_mount EXIT
+
+MOUNT_TARGET="$(findmnt -no TARGET --target "$PREFIX" 2>/dev/null || true)"
+if [ -n "$MOUNT_TARGET" ] &&
+   findmnt -no OPTIONS --target "$PREFIX" 2>/dev/null | grep -qE '(^|,)ro(,|$)'; then
+    echo "==> ${MOUNT_TARGET} is read-only, remounting read-write"
+    mount -o remount,rw "$MOUNT_TARGET"
+    REMOUNTED_RO_TARGET="$MOUNT_TARGET"
+fi
+
 echo "==> Installing to ${PREFIX}"
 install -d "${PREFIX}/bin" "${PREFIX}/lib"
 install -m 0755 "${SRC_DIR}/bin/qcperf" "${PREFIX}/bin/"
 install -m 0644 "${SRC_DIR}/lib/libqcperfCore.so"  "${PREFIX}/lib/"
-
-if [ -d "$LINK_DIR" ] && [ -w "$LINK_DIR" ]; then
-    ln -sf "${PREFIX}/bin/qcperf" "${LINK_DIR}/qcperf"
-    echo "==> Linked ${LINK_DIR}/qcperf"
-else
-    echo "==> ${LINK_DIR} not writable, skipping symlink"
-fi
 
 echo "==> Verifying against NPU0"
 if ! "${PREFIX}/bin/qcperf" 0 2 >/dev/null; then
@@ -40,4 +53,4 @@ if ! "${PREFIX}/bin/qcperf" 1 2 >/dev/null; then
     exit 1
 fi
 
-echo "==> Install OK: $(command -v qcperf || echo "${PREFIX}/bin/qcperf")"
+echo "==> Install OK: ${PREFIX}/bin/qcperf"
