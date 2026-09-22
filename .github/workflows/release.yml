@@ -1,0 +1,268 @@
+name: Release
+
+# Tag-triggered release build.
+# Builds QcPerfCore for all three supported platforms (Android ARM64, Linux
+# ARM64 cross-compile, and Windows ARM64), each in both static and shared
+# library variants — using the same scripts as the PR sanity-build gate.
+# Packages each build's library + public headers and publishes them all to
+# a GitHub Release for the pushed tag.
+#
+# Trigger: push a tag matching v<build>.<major>.<minor>.<patch>, e.g. v0.1.0.0
+
+on:
+  push:
+    tags: ["v*.*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build/release (e.g. v0.1.0.0)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  AARCH64_TOOLCHAIN_VERSION: "15.2.rel1"
+  ANDROID_NDK_VERSION: "r27c"
+
+jobs:
+  build-android-aarch64:
+    name: Build android-aarch64 (shared=${{ matrix.build_shared }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_shared: ["OFF", "ON"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          submodules: true
+          persist-credentials: false
+
+      - name: Resolve version
+        id: version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Android NDK
+        run: |
+          set -euo pipefail
+          URL="https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux.zip"
+          mkdir -p "${{ runner.temp }}/android-ndk"
+          curl -fL "${URL}" -o /tmp/ndk.zip
+          unzip -q /tmp/ndk.zip -d /tmp/ndk-extracted
+          mv /tmp/ndk-extracted/*/* "${{ runner.temp }}/android-ndk"/
+
+      - name: Build (android-aarch64, Release, shared=${{ matrix.build_shared }})
+        env:
+          ANDROID_NDK_PATH: ${{ runner.temp }}/android-ndk
+          PROJECT_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_SHARED: ${{ matrix.build_shared }}
+        run: |
+          chmod +x qcperf/ci/build-android-aarch64.sh
+          qcperf/ci/build-android-aarch64.sh Release "${BUILD_SHARED}"
+
+      - name: Package artifact
+        id: package
+        env:
+          BUILD_SHARED: ${{ matrix.build_shared }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          VARIANT="static"
+          LIB_NAME="libqcperfCore.a"
+          BUILD_DIR="build-android-aarch64-release"
+          if [ "${BUILD_SHARED}" = "ON" ]; then
+            VARIANT="shared"
+            LIB_NAME="libqcperfCore.so"
+            BUILD_DIR="build-android-aarch64-release-shared"
+          fi
+          NAME="qcperfCore-${VERSION}-android-aarch64-${VARIANT}"
+          STAGE_DIR="staging/${NAME}"
+          mkdir -p "${STAGE_DIR}/lib" "${STAGE_DIR}/include"
+          cp "${BUILD_DIR}/${LIB_NAME}" "${STAGE_DIR}/lib/"
+          cp -r qcperf/core/inc/. "${STAGE_DIR}/include/"
+          cp -r qcperf/backends/inc/*.h "${STAGE_DIR}/include/" 2>/dev/null || true
+          tar -C staging -czf "${NAME}.tar.gz" "${NAME}"
+          echo "artifact=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.package.outputs.artifact }}
+          path: ${{ steps.package.outputs.artifact }}
+          retention-days: 7
+
+  build-linux-aarch64:
+    name: Build linux-aarch64 (shared=${{ matrix.build_shared }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_shared: ["OFF", "ON"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          submodules: true
+          persist-credentials: false
+
+      - name: Resolve version
+        id: version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download ARM GNU Toolchain
+        run: |
+          set -euo pipefail
+          URL="https://developer.arm.com/-/media/Files/downloads/gnu/${AARCH64_TOOLCHAIN_VERSION}/binrel/arm-gnu-toolchain-${AARCH64_TOOLCHAIN_VERSION}-x86_64-aarch64-none-linux-gnu.tar.xz"
+          mkdir -p "${{ runner.temp }}/arm-gnu-toolchain"
+          curl -fL "${URL}" -o /tmp/toolchain.tar.xz
+          tar -xJf /tmp/toolchain.tar.xz -C "${{ runner.temp }}/arm-gnu-toolchain" --strip-components=1
+
+      - name: Build (linux-aarch64, Release, shared=${{ matrix.build_shared }})
+        env:
+          AARCH64_TOOLCHAIN_PATH: ${{ runner.temp }}/arm-gnu-toolchain
+          PROJECT_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_SHARED: ${{ matrix.build_shared }}
+        run: |
+          chmod +x qcperf/ci/build-linux-aarch64.sh
+          qcperf/ci/build-linux-aarch64.sh Release "${BUILD_SHARED}"
+
+      - name: Package artifact
+        id: package
+        env:
+          BUILD_SHARED: ${{ matrix.build_shared }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          VARIANT="static"
+          LIB_NAME="libqcperfCore.a"
+          BUILD_DIR="build-linux-aarch64-release"
+          if [ "${BUILD_SHARED}" = "ON" ]; then
+            VARIANT="shared"
+            LIB_NAME="libqcperfCore.so"
+            BUILD_DIR="build-linux-aarch64-release-shared"
+          fi
+          NAME="qcperfCore-${VERSION}-linux-aarch64-${VARIANT}"
+          STAGE_DIR="staging/${NAME}"
+          mkdir -p "${STAGE_DIR}/lib" "${STAGE_DIR}/include"
+          cp "${BUILD_DIR}/${LIB_NAME}" "${STAGE_DIR}/lib/"
+          cp -r qcperf/core/inc/. "${STAGE_DIR}/include/"
+          cp -r qcperf/backends/inc/*.h "${STAGE_DIR}/include/" 2>/dev/null || true
+          tar -C staging -czf "${NAME}.tar.gz" "${NAME}"
+          echo "artifact=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.package.outputs.artifact }}
+          path: ${{ steps.package.outputs.artifact }}
+          retention-days: 7
+
+  build-windows-arm64:
+    name: Build windows-arm64 (shared=${{ matrix.build_shared }})
+    # NOTE: windows-11-arm is a GitHub-hosted ARM64 Windows runner. If it is
+    # not available on this org's GitHub plan, switch to windows-latest
+    # (x86_64 host cross-compiling to ARM64 via the VS ARM64 toolset still
+    # works with the same script/commands).
+    runs-on: windows-11-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        build_shared: [false, true]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          submodules: true
+          persist-credentials: false
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          $version = $env:TAG.TrimStart("v")
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build (windows-arm64, Release, shared=${{ matrix.build_shared }})
+        shell: pwsh
+        env:
+          PROJECT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ("${{ matrix.build_shared }}" -eq "true") {
+            qcperf/ci/build-windows-arm64.ps1 -Config Release -BuildShared
+          } else {
+            qcperf/ci/build-windows-arm64.ps1 -Config Release
+          }
+
+      - name: Package artifact
+        id: package
+        shell: pwsh
+        env:
+          BUILD_SHARED: ${{ matrix.build_shared }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $variant = "static"
+          $libName = "qcperfCore.lib"
+          $buildDir = "build-windows-arm64-release"
+          if ($env:BUILD_SHARED -eq "true") {
+            $variant = "shared"
+            $libName = "qcperfCore.dll"
+            $buildDir = "build-windows-arm64-release-shared"
+          }
+          $name = "qcperfCore-$($env:VERSION)-windows-arm64-$variant"
+          $stageDir = "staging/$name"
+          New-Item -ItemType Directory -Force -Path "$stageDir/lib" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stageDir/include" | Out-Null
+          Copy-Item "$buildDir/Release/$libName" "$stageDir/lib/"
+          Copy-Item -Recurse "qcperf/core/inc/*" "$stageDir/include/"
+          Copy-Item "qcperf/backends/inc/*.h" "$stageDir/include/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path $stageDir -DestinationPath "$name.zip"
+          echo "artifact=$name.zip" >> $env:GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.package.outputs.artifact }}
+          path: ${{ steps.package.outputs.artifact }}
+          retention-days: 7
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-android-aarch64, build-linux-aarch64, build-windows-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes "Automated release build for ${TAG}. Contains QcPerfCore static/shared artifacts for android-aarch64, linux-aarch64, and windows-arm64." \
+            artifacts/*

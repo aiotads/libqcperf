@@ -58,6 +58,7 @@ Originally inspired by the Qualcomm Profiler tool, libqcperf is now available as
 | **Linux CPU Backend** | Qcom Linux | `CPU` | `QCPERF_ENABLED_QCOM_LINUX_CPU` | Monitors CPU load, frequency, effective utilization, steal time, and DCVS frequency limit per core (up to 18 cores) | [qcom_linux_cpu_info.h](qcperf/backends/qcom-linux-cpu/inc/qcom_linux_cpu_info.h) |
 | **DSP NPU Backend** | Qcom Linux | `NPU` | `QCPERF_ENABLED_QCOM_LINUX_NPU` | Monitors Neural Processing Unit (NPU) performance metrics including Q6 utilization, Q6 clock frequency, HVX utilization, and HMX utilization | [qcom_dsp_npu_info.h](qcperf/backends/qcom-dsp-npu/inc/qcom_dsp_npu_info.h) |
 | **Linux Thermal Backend** | Qcom Linux | `THERMAL` | `QCPERF_ENABLED_QCOM_LINUX_THERMAL` | Monitors kernel thermal-zone temperatures and cooling-device throttle levels via `/sys/class/thermal`, aggregated into 16 temperature and 12 cooling domains (CPU, GPU, NPU, DDR, Modem, etc.); only domains with sensors present on the platform are advertised | [linux_thermal_info.h](qcperf/backends/linux-thermal/inc/linux_thermal_info.h) |
+| **DSP NPU Backend** | Windows on Snapdragon (WoS) | `NPU` | `QCPERF_ENABLED_WOS_NPU` | Monitors Neural Processing Unit (NPU) performance metrics including Q6 utilization, Q6 clock frequency, HVX utilization, and HMX utilization | [qcom_dsp_npu_info.h](qcperf/backends/qcom-dsp-npu/inc/qcom_dsp_npu_info.h) |
 | **Dummy Backend** | All | `DUMMY` | `QCPERF_ENABLED_DUMMY` | Reference implementation for testing and development | [dummy_info.h](qcperf/backends/dummy/inc/dummy_info.h) |
 
 > **Note:** Each backend's info.h file contains detailed information about supported capability, metrics, sampling rates, and streaming rates.
@@ -108,9 +109,12 @@ cmake -S qcperf -B build-android-aarch64-release \
     -DANDROID_PLATFORM=android-29 \
     -DCMAKE_BUILD_TYPE=Release \
     -DProjectVersion="0.1.0.0" \
-    -DBACKENDS="CPU;NPU;DUMMY"
+    -DBACKENDS="CPU;NPU;DUMMY" \
+    -DBUILD_SHARED=OFF
 cmake --build build-android-aarch64-release
 ```
+
+> **Note:** `-DBUILD_SHARED=ON` builds `libqcperfCore.so` instead of the default static `libqcperfCore.a` (see the `-DBUILD_SHARED` flag description in the Linux ARM64 section below).
 
 > **Note:** When running on the device, if `libcdsprpc.so` is not found at runtime, set:
 > ```bash
@@ -202,6 +206,8 @@ cmake --build --preset linux-aarch64-release-shared
 ### Windows ARM64 Compilation
 
 To build the library for Windows on ARM64 platforms:
+
+**Supported backends:** `DUMMY`, `THERMAL`, `POWER`, `CPU`, `NPU`
 
 ```bash
 # Clone the repository
