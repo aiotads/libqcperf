@@ -116,16 +116,20 @@ static const struct LinuxThermalMetricDef g_metric_defs[LINUX_THERMAL_CAPABILITY
  * @param[in]  def Static metric definition to copy from
  */
 static void linux_thermal_populate_metric(struct QcPerfMetricInfo* dst, const struct LinuxThermalMetricDef* def) {
-    dst->metric_id = def->metric_id;
+    if(dst == NULL || def == NULL) {
+        return;
+    } else {
+      dst->metric_id = def->metric_id;
 
-    snprintf(dst->metric_name, METRIC_NAME_MAX_LEN, "%s", def->name);
-    dst->metric_name_len = strlen(dst->metric_name);
+      snprintf(dst->metric_name, METRIC_NAME_MAX_LEN, "%s", def->name);
+      dst->metric_name_len = strlen(dst->metric_name);
 
-    snprintf(dst->metric_description, MAX_METRIC_DESCRIPTION_LEN, "%s", def->description);
-    dst->metric_description_len = strlen(dst->metric_description);
+      snprintf(dst->metric_description, MAX_METRIC_DESCRIPTION_LEN, "%s", def->description);
+      dst->metric_description_len = strlen(dst->metric_description);
 
-    snprintf(dst->metric_unit, MAX_METRIC_UNIT_LEN, "%s", def->unit);
-    dst->metric_unit_len = strlen(dst->metric_unit);
+      snprintf(dst->metric_unit, MAX_METRIC_UNIT_LEN, "%s", def->unit);
+      dst->metric_unit_len = strlen(dst->metric_unit);
+    }
 }
 
 /**
