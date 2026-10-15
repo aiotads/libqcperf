@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build libqcperf's NPU and GPU samplers and lay out an install package for the target.
+# Build libqcperf's NPU and GPU sampler and refresh installing/ with the result.
 #
 # Two supported hosts:
 #   * an aarch64 Qualcomm Linux board -- builds natively, no SDK needed;
@@ -12,18 +12,15 @@
 #
 # Set OECORE_DIR to point at a non-default SDK install.
 #
-# Produces: libqcperf-npu-<version>-aarch64.tar.gz
+# Updates installing/bin/qcperf and installing/lib/libqcperfCore.so. The install
+# scripts and README in installing/ are maintained there directly.
 set -euo pipefail
 
 VERSION="${VERSION:-0.1.0.0}"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-${SRC_DIR}/build-package}"
 OECORE_DIR="${OECORE_DIR:-/usr/local/oecore-x86_64}"
-STAGE_DIR="$(mktemp -d)"
-PKG_NAME="libqcperf-npu-${VERSION}-aarch64"
-OUT_TARBALL="${SRC_DIR}/${PKG_NAME}.tar.gz"
-
-trap 'rm -rf "$STAGE_DIR"' EXIT
+INSTALL_DIR="${SRC_DIR}/installing"
 
 CMAKE_ARGS=(
     -DCMAKE_BUILD_TYPE=Release
@@ -65,12 +62,8 @@ if [ ! -x "${BUILD_DIR}/qcperf" ]; then
     exit 1
 fi
 
-echo "==> Staging"
-install -d "${STAGE_DIR}/${PKG_NAME}/bin" "${STAGE_DIR}/${PKG_NAME}/lib"
-install -m 0755 "${BUILD_DIR}/qcperf" "${STAGE_DIR}/${PKG_NAME}/bin/"
-install -m 0644 "${BUILD_DIR}/libqcperfCore.so"  "${STAGE_DIR}/${PKG_NAME}/lib/"
-install -m 0755 "${SRC_DIR}/packaging/install.sh" "${STAGE_DIR}/${PKG_NAME}/"
-
-echo "==> Packing ${OUT_TARBALL}"
-tar -czf "$OUT_TARBALL" -C "$STAGE_DIR" "$PKG_NAME"
-echo "$OUT_TARBALL"
+echo "==> Updating ${INSTALL_DIR}"
+install -d "${INSTALL_DIR}/bin" "${INSTALL_DIR}/lib"
+install -m 0755 "${BUILD_DIR}/qcperf" "${INSTALL_DIR}/bin/"
+install -m 0644 "${BUILD_DIR}/libqcperfCore.so" "${INSTALL_DIR}/lib/"
+echo "${INSTALL_DIR}"
