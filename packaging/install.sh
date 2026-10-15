@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Install the libqcperf NPU sampler.
+# Install the libqcperf NPU and GPU samplers.
 #
 # Default prefix is /usr, so the binary lands in /usr/bin and is on the default
 # PATH with no shell setup. The binary carries an RPATH of $ORIGIN/../lib, so
@@ -38,7 +38,7 @@ fi
 
 echo "==> Installing to ${PREFIX}"
 install -d "${PREFIX}/bin" "${PREFIX}/lib"
-install -m 0755 "${SRC_DIR}/bin/qcperf" "${PREFIX}/bin/"
+install -m 0755 "${SRC_DIR}/bin/qcperf" "${SRC_DIR}/bin/qcperf-gpu" "${PREFIX}/bin/"
 install -m 0644 "${SRC_DIR}/lib/libqcperfCore.so"  "${PREFIX}/lib/"
 
 echo "==> Verifying against NPU0"
@@ -53,4 +53,10 @@ if ! "${PREFIX}/bin/qcperf" 1 2 >/dev/null; then
     exit 1
 fi
 
-echo "==> Install OK: ${PREFIX}/bin/qcperf"
+echo "==> Verifying GPU"
+if ! "${PREFIX}/bin/qcperf-gpu" 2 >/dev/null; then
+    echo "Error: qcperf-gpu failed. Check that /sys/class/kgsl/kgsl-3d0 exists." >&2
+    exit 1
+fi
+
+echo "==> Install OK: ${PREFIX}/bin/qcperf, ${PREFIX}/bin/qcperf-gpu"

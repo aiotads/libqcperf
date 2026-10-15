@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build libqcperf's NPU sampler and lay out an install package for the target.
+# Build libqcperf's NPU and GPU samplers and lay out an install package for the target.
 #
 # Two supported hosts:
 #   * an aarch64 Qualcomm Linux board -- builds natively, no SDK needed;
@@ -28,7 +28,7 @@ trap 'rm -rf "$STAGE_DIR"' EXIT
 CMAKE_ARGS=(
     -DCMAKE_BUILD_TYPE=Release
     -DBUILD_SHARED=ON
-    -DBACKENDS="NPU"
+    -DBACKENDS="NPU;GPU"
     -DProjectVersion="$VERSION"
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
 )
@@ -59,15 +59,17 @@ cmake -S "${SRC_DIR}/qcperf" -B "$BUILD_DIR" "${CMAKE_ARGS[@]}" >/dev/null
 echo "==> Building"
 cmake --build "$BUILD_DIR" -j"$(nproc)" >/dev/null
 
-if [ ! -x "${BUILD_DIR}/qcperf" ]; then
-    echo "Error: ${BUILD_DIR}/qcperf was not built." >&2
-    echo "  The NPU backend was skipped -- check the configure log above." >&2
-    exit 1
-fi
+for tool in qcperf qcperf-gpu; do
+    if [ ! -x "${BUILD_DIR}/${tool}" ]; then
+        echo "Error: ${BUILD_DIR}/${tool} was not built." >&2
+        echo "  The NPU/GPU backend was skipped -- check the configure log above." >&2
+        exit 1
+    fi
+done
 
 echo "==> Staging"
 install -d "${STAGE_DIR}/${PKG_NAME}/bin" "${STAGE_DIR}/${PKG_NAME}/lib"
-install -m 0755 "${BUILD_DIR}/qcperf" "${STAGE_DIR}/${PKG_NAME}/bin/"
+install -m 0755 "${BUILD_DIR}/qcperf" "${BUILD_DIR}/qcperf-gpu" "${STAGE_DIR}/${PKG_NAME}/bin/"
 install -m 0644 "${BUILD_DIR}/libqcperfCore.so"  "${STAGE_DIR}/${PKG_NAME}/lib/"
 install -m 0755 "${SRC_DIR}/packaging/install.sh" "${STAGE_DIR}/${PKG_NAME}/"
 
