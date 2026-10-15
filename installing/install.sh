@@ -41,21 +41,25 @@ install -d "${PREFIX}/bin" "${PREFIX}/lib"
 install -m 0755 "${SRC_DIR}/bin/qcperf" "${PREFIX}/bin/"
 install -m 0644 "${SRC_DIR}/lib/libqcperfCore.so"  "${PREFIX}/lib/"
 
-echo "==> Verifying against NPU0"
-if ! "${PREFIX}/bin/qcperf" 0 2 >/dev/null; then
-    echo "Error: sampler failed on NPU0. Check that" >&2
+echo "==> Verifying NPU0, NPU1 and GPU"
+# One run samples all three. qcperf still prints what it did collect when one
+# of them fails, so keep the output and check each source separately.
+SAMPLE_OUT="$("${PREFIX}/bin/qcperf" 2)" || true
+FAILED=0
+if ! grep -q '^NPU0_Q6_UTIL=' <<<"$SAMPLE_OUT"; then
+    echo "Error: no NPU0 data. Check that" >&2
     echo "  /usr/lib/dsp/cdsp/libsysmonquery_skel.so and /dev/fastrpc-cdsp exist." >&2
-    exit 1
+    FAILED=1
 fi
-echo "==> Verifying against NPU1"
-if ! "${PREFIX}/bin/qcperf" 1 2 >/dev/null; then
-    echo "Error: sampler failed on NPU1. Check /usr/lib/dsp/cdsp1/ and /dev/fastrpc-cdsp1." >&2
-    exit 1
+if ! grep -q '^NPU1_Q6_UTIL=' <<<"$SAMPLE_OUT"; then
+    echo "Error: no NPU1 data. Check /usr/lib/dsp/cdsp1/ and /dev/fastrpc-cdsp1." >&2
+    FAILED=1
 fi
-
-echo "==> Verifying GPU"
-if ! "${PREFIX}/bin/qcperf" 0 2 2>/dev/null | grep -q '^GPU_UTIL='; then
-    echo "Error: qcperf reported no GPU metrics. Check that /sys/class/kgsl/kgsl-3d0 exists." >&2
+if ! grep -q '^GPU_UTIL=' <<<"$SAMPLE_OUT"; then
+    echo "Error: no GPU data. Check that /sys/class/kgsl/kgsl-3d0 exists." >&2
+    FAILED=1
+fi
+if [ "$FAILED" -ne 0 ]; then
     exit 1
 fi
 
