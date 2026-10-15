@@ -83,10 +83,19 @@ endif()
 # - backends: Performance monitoring backend implementations
 # - utils: Utility libraries used by core and backends
 # - core-test: Test application for the core library
+option(QCPERF_BUILD_TESTS "Build host-runnable unit tests" OFF)
+if(QCPERF_BUILD_TESTS)
+    enable_testing()
+endif()
+
 add_subdirectory(core)
 add_subdirectory(backends)
 add_subdirectory(utils)
 add_subdirectory(test_app)
+
+if(QCPERF_ENABLED_QCOM_LINUX_GPU)
+    add_subdirectory(tools/gpu_sampler)
+endif()
 
 # Local addition: NSP sampler used by the qprof monitor script.
 if(QCPERF_ENABLED_QCOM_LINUX_NPU)
