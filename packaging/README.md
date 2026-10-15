@@ -1,8 +1,8 @@
 # qcperf — build, install and usage
 
-`qcperf` is a one-shot NSP and GPU utilization sampler built on libqcperf. It
-averages the DSP NPU metrics, and the GPU metrics, over a fixed window and
-prints them as `KEY=VALUE` lines, so shell monitors can consume it directly.
+`qcperf` is a one-shot NPU0, NPU1 and GPU sampler built on libqcperf. It
+averages every metric over a fixed window and prints them all as `KEY=VALUE`
+lines, so shell monitors can grep what they need.
 
 Two directories at the repository root:
 
@@ -56,14 +56,12 @@ cd installing
 a board you are already logged into, run `./install.sh` as root instead.
 
 The installer puts `qcperf` in `/usr/bin` and `libqcperfCore.so` in `/usr/lib`,
-then samples NPU0, NPU1 and the GPU once each and fails loudly if any does not
-respond.
+then runs `qcperf` once and fails loudly if NPU0, NPU1 or the GPU reports no
+data.
 
 ```
 ==> Installing to /usr
-==> Verifying against NPU0
-==> Verifying against NPU1
-==> Verifying GPU
+==> Verifying NPU0, NPU1 and GPU
 ==> Install OK: /usr/bin/qcperf
 ```
 
@@ -94,72 +92,68 @@ rm -f /usr/bin/qcperf /usr/lib/libqcperfCore.so
 ## Usage
 
 ```
-qcperf <npu_index> <profile_seconds> [sampling_rate_ms]
+qcperf <seconds> [sampling_rate_ms]
 ```
 
 | Argument | Values | Meaning |
 |---|---|---|
-| `npu_index` | `0` or `1` | `0` is NPU0 (cdsp), `1` is NPU1 (cdsp1) |
-| `profile_seconds` | integer, at least 1 | averaging window |
+| `seconds` | integer, at least 1 | averaging window |
 | `sampling_rate_ms` | `1`, `5`, `10`, `50`, `100` or `200` | sampling period, default `200` |
 
-Sample NPU0 and the GPU for three seconds:
+NPU0, NPU1 and the GPU are sampled concurrently over the same window:
 
 ```console
-# qcperf 0 3
-NPU_INDEX=0
-Q6_UTIL=35.0678
-Q6_CLOCK_KHZ=921600.0000
-HVX_UTIL=26.1441
-HMX_UTIL=5.9012
-SAMPLES=14
-GPU_UTIL=0.2667
+# qcperf 3
+NPU0_Q6_UTIL=21.7544
+NPU0_Q6_CLOCK_KHZ=1459200.0000
+NPU0_HVX_UTIL=4.4782
+NPU0_HMX_UTIL=1.0930
+NPU0_SAMPLES=14
+NPU1_Q6_UTIL=0.0716
+NPU1_Q6_CLOCK_KHZ=921600.0000
+NPU1_HVX_UTIL=0.0000
+NPU1_HMX_UTIL=0.0000
+NPU1_SAMPLES=14
+GPU_UTIL=0.2000
 GPU_CLOCK_MHZ=405.0000
 ```
 
-Output fields:
-
 | Key | Unit | Meaning |
 |---|---|---|
-| `NPU_INDEX` | — | which NSP was sampled |
-| `Q6_UTIL` | % | Hexagon Q6 scalar core utilization |
-| `Q6_CLOCK_KHZ` | KHz | Q6 clock frequency |
-| `HVX_UTIL` | % | vector unit utilization |
-| `HMX_UTIL` | % | matrix unit utilization |
-| `SAMPLES` | count | NPU readings averaged, after the warm-up reading is dropped |
+| `NPU<n>_Q6_UTIL` | % | Hexagon Q6 scalar core utilization |
+| `NPU<n>_Q6_CLOCK_KHZ` | KHz | Q6 clock frequency |
+| `NPU<n>_HVX_UTIL` | % | vector unit utilization |
+| `NPU<n>_HMX_UTIL` | % | matrix unit utilization |
+| `NPU<n>_SAMPLES` | count | NPU readings averaged, after the warm-up reading is dropped |
 | `GPU_UTIL` | % | Adreno GPU busy percentage |
 | `GPU_CLOCK_MHZ` | MHz | current GPU clock |
 
 The GPU values are read from `/sys/class/kgsl/kgsl-3d0` (`gpu_busy_percentage`
-and `gpuclk`) over the same window. If the GPU cannot be read, a warning goes
-to stderr and only the NPU keys are printed. GPU readings are the kgsl
-driver's own busy statistic, so they track but do not match Qualcomm Profiler
-(qprof) sample for sample.
+and `gpuclk`) over the same window. They are the kgsl driver's own busy
+statistic, so they track but do not match Qualcomm Profiler (qprof) sample for
+sample.
 
 The first NPU reading after the sysmon session opens measures the session setup
 rather than the workload, so it is discarded. A window must therefore be long
 enough to produce at least two readings; with the default 200 ms rate, one
 second is already enough.
 
-The backend holds a single sysmon session per process, so one process monitors
-one NSP. To watch both NPUs, run the tool twice:
+The NPU backend holds a single sysmon session per process, so `qcperf` forks
+one child per NPU and samples the GPU in the parent. All three run at once and
+the results are printed in a fixed order: NPU0, NPU1, GPU.
+
+Pick values with grep, or load them all into a shell:
 
 ```bash
-for npu in 0 1; do
-    qcperf "$npu" 5
-done
+qcperf 3 | grep '^GPU'
+eval "$(qcperf 3)"
+echo "NPU0 ${NPU0_Q6_UTIL}%  NPU1 ${NPU1_Q6_UTIL}%  GPU ${GPU_UTIL}%"
 ```
 
-Because the output is plain `KEY=VALUE`, a shell can consume it with no parser:
-
-```bash
-eval "$(qcperf 0 5)"
-echo "NPU0 Q6: ${Q6_UTIL}%  GPU: ${GPU_UTIL}%"
-```
-
-The tool exits zero only when it collected at least one usable NPU sample.
-Diagnostics go to stderr prefixed with `[qcperf]`, keeping stdout clean for
-the `KEY=VALUE` block.
+If the GPU cannot be read, a warning goes to stderr and the `GPU_*` lines are
+left out. If an NPU cannot be read, its lines are left out and the exit code is
+non-zero. Diagnostics go to stderr prefixed with `[qcperf]`, keeping stdout
+clean for the `KEY=VALUE` block.
 
 ## Troubleshooting
 
@@ -176,10 +170,11 @@ read. Check that the Adreno kgsl driver is loaded. The same message appears if
 a stale `/usr/lib/libqcperfCore.so` without the GPU backend is picked up
 instead of the one next to the binary.
 
-**`start failed` mentioning the sampling rate.** `sampling_rate_ms` accepts
-only 1, 5, 10, 50, 100 and 200.
+**`Usage: ...` when you expected a measurement.** The old form
+`qcperf <npu_index> <seconds>` no longer exists; run `qcperf <seconds>`.
+`sampling_rate_ms` accepts only 1, 5, 10, 50, 100 and 200.
 
-**`no samples collected`.** The window closed before a second reading arrived.
+**`no samples collected for NPU<n>`.** The window closed before a second reading arrived.
 Use a longer window or a faster sampling rate.
 
 **`make-package.sh` fails with `qcperf was not built`.** The NPU backend was

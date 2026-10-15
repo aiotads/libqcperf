@@ -1,8 +1,8 @@
 # qcperf — NPU and GPU sampler
 
-`qcperf` samples NPU and GPU utilization on a Qualcomm Linux board (aarch64)
-and prints the average over a time window as `KEY=VALUE` lines. One command
-gives you both NPU and GPU numbers.
+`qcperf` samples NPU0, NPU1 and the GPU on a Qualcomm Linux board (aarch64)
+and prints every metric, averaged over a time window, as `KEY=VALUE` lines.
+One command gives you all of it; grep for what you need.
 
 This directory is ready to use: the binary is prebuilt, nothing to compile.
 
@@ -17,13 +17,11 @@ Run this on your PC with the board connected. Only `adb` (or `ssh`) is needed.
 ```
 
 It copies this directory to the board, installs `qcperf` to `/usr/bin` and
-`libqcperfCore.so` to `/usr/lib`, then checks NPU0, NPU1 and the GPU. You
-should see:
+`libqcperfCore.so` to `/usr/lib`, then checks that NPU0, NPU1 and the GPU all
+report data. You should see:
 
 ```
-==> Verifying against NPU0
-==> Verifying against NPU1
-==> Verifying GPU
+==> Verifying NPU0, NPU1 and GPU
 ==> Install OK: /usr/bin/qcperf
 ```
 
@@ -35,56 +33,60 @@ Already logged in on the board? Copy this directory there and run
 On the board:
 
 ```sh
-qcperf <npu_index> <seconds> [sampling_rate_ms]
+qcperf <seconds> [sampling_rate_ms]
 ```
 
 | Argument | Meaning |
 |---|---|
-| `npu_index` | `0` = NPU0, `1` = NPU1 |
 | `seconds` | how long to sample (the result is the average), at least 1 |
 | `sampling_rate_ms` | optional: `1`, `5`, `10`, `50`, `100` or `200` (default `200`) |
 
-Example: sample NPU0 and the GPU for 3 seconds.
+NPU0, NPU1 and the GPU are sampled at the same time over the same window, so
+the command takes about `seconds` to finish.
 
 ```console
-# qcperf 0 3
-NPU_INDEX=0
-Q6_UTIL=26.4957
-Q6_CLOCK_KHZ=1459200.0000
-HVX_UTIL=6.4927
-HMX_UTIL=1.1965
-SAMPLES=14
-GPU_UTIL=0.2667
+# qcperf 3
+NPU0_Q6_UTIL=21.7544
+NPU0_Q6_CLOCK_KHZ=1459200.0000
+NPU0_HVX_UTIL=4.4782
+NPU0_HMX_UTIL=1.0930
+NPU0_SAMPLES=14
+NPU1_Q6_UTIL=0.0716
+NPU1_Q6_CLOCK_KHZ=921600.0000
+NPU1_HVX_UTIL=0.0000
+NPU1_HMX_UTIL=0.0000
+NPU1_SAMPLES=14
+GPU_UTIL=0.2000
 GPU_CLOCK_MHZ=405.0000
 ```
 
 | Key | Unit | Meaning |
 |---|---|---|
-| `NPU_INDEX` | — | which NPU was sampled |
-| `Q6_UTIL` | % | NPU scalar core utilization |
-| `Q6_CLOCK_KHZ` | KHz | NPU clock |
-| `HVX_UTIL` | % | NPU vector unit utilization |
-| `HMX_UTIL` | % | NPU matrix unit utilization |
-| `SAMPLES` | count | number of NPU readings averaged |
+| `NPU<n>_Q6_UTIL` | % | NPU scalar core utilization |
+| `NPU<n>_Q6_CLOCK_KHZ` | KHz | NPU clock |
+| `NPU<n>_HVX_UTIL` | % | NPU vector unit utilization |
+| `NPU<n>_HMX_UTIL` | % | NPU matrix unit utilization |
+| `NPU<n>_SAMPLES` | count | number of readings averaged |
 | `GPU_UTIL` | % | GPU utilization |
 | `GPU_CLOCK_MHZ` | MHz | GPU clock |
 
-**One run samples one NPU, plus the GPU.** To read both NPUs, run it twice:
+**Pick what you need with grep:**
 
 ```sh
-qcperf 0 3
-qcperf 1 3
+qcperf 3 | grep '^GPU'                 # GPU only
+qcperf 3 | grep '^NPU1_Q6_UTIL'        # one value
 ```
 
 **Use the values in a shell script:**
 
 ```sh
-eval "$(qcperf 0 3)"
-echo "NPU0 ${Q6_UTIL}%  GPU ${GPU_UTIL}% @ ${GPU_CLOCK_MHZ} MHz"
+eval "$(qcperf 3)"
+echo "NPU0 ${NPU0_Q6_UTIL}%  NPU1 ${NPU1_Q6_UTIL}%  GPU ${GPU_UTIL}%"
 ```
 
 The GPU numbers come from `/sys/class/kgsl/kgsl-3d0`. If the GPU cannot be
-read, `qcperf` prints a warning on stderr and shows only the NPU values.
+read, `qcperf` prints a warning on stderr and leaves the `GPU_*` lines out. If
+an NPU cannot be read, its lines are left out and the exit code is non-zero.
 
 ## Requirements
 
@@ -101,8 +103,10 @@ On the board:
   readable. Check that the GPU driver is loaded.
 - **`connect NPU<n> failed`**: the fastrpc device node or the sysmon library
   listed under Requirements is missing.
-- **`no samples collected`**: the window was too short. Use a longer
+- **`no samples collected for NPU<n>`**: the window was too short. Use a longer
   `seconds` or a smaller `sampling_rate_ms`.
+- **`Usage: ...`**: the old form `qcperf <npu_index> <seconds>` is gone. Run
+  `qcperf <seconds>`.
 - **`qcperf: command not found`**: it was installed under a custom `PREFIX`.
   Call it by its full path.
 
