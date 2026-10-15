@@ -1,17 +1,24 @@
 /*
- * qcperf - one-shot NSP and GPU utilization sampler built on libqcperf (was qcperf-npu-sample).
+ * qcperf - one-shot NPU0, NPU1 and GPU utilization sampler built on libqcperf.
  *
- * Averages the DSP NPU metrics, and the GPU metrics when the GPU backend is
- * built in, over a fixed window and prints them as KEY=VALUE lines, so shell
- * monitors can consume it without parsing the decorated output of QcPerfCoreTest.
+ * Averages every metric over a fixed window and prints all of them as
+ * KEY=VALUE lines, so shell monitors can grep what they need without parsing
+ * the decorated output of QcPerfCoreTest:
  *
- * The backend holds a single sysmon session, so one process monitors one NSP:
- * run it once per NPU rather than trying to sample both from one process.
+ *   NPU0_Q6_UTIL=...  NPU0_Q6_CLOCK_KHZ=...  NPU0_HVX_UTIL=...  NPU0_HMX_UTIL=...
+ *   NPU0_SAMPLES=...  NPU1_* (same keys)     GPU_UTIL=...  GPU_CLOCK_MHZ=...
+ *
+ * The NPU backend holds a single sysmon session per process, so each NPU is
+ * sampled by its own forked child. The children are forked before libqcperf is
+ * initialised in this process, so no thread exists yet when fork() runs. The
+ * GPU is sampled in the parent while the children run, and the three results
+ * are printed in a fixed order once everything has finished.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "qcperf.h"
@@ -21,11 +28,11 @@
 #include "qcom_linux_gpu_info.h"
 #endif
 
+#define NPU_COUNT 2
 #define METRIC_COUNT 4
-
-static double g_sum[METRIC_COUNT];
-static unsigned long g_count[METRIC_COUNT];
-static unsigned long g_seen[METRIC_COUNT];
+#define STREAMING_RATE_MS 1000
+#define DEFAULT_SAMPLING_RATE_MS 200
+#define OUTPUT_MAX 1024
 
 /* The first reading after the sysmon session is opened covers the session
    setup itself, not the workload: it reads far above the steady state (e.g.
@@ -40,85 +47,40 @@ static const char* const METRIC_KEY[METRIC_COUNT] = {
     "HMX_UTIL",      /* metric id 3, % */
 };
 
+static const unsigned int SAMPLING_RATES_MS[] = {1, 5, 10, 50, 100, 200};
+
+/* Accumulates one backend's readings. Each NPU child and the parent's GPU run
+   own a separate copy, since they are separate processes or run in sequence. */
+struct Accumulator {
+    double sum[METRIC_COUNT];
+    unsigned long count[METRIC_COUNT];
+    unsigned long seen[METRIC_COUNT];
+    uint32_t metric_count;
+    unsigned long skip;
+};
+
+static struct Accumulator g_acc;
+
 static enum QcPerfReturnCode data_callback(struct QcPerfData* data) {
     if (NULL == data || NULL == data->metric_response) {
         return QC_PERF_RETURN_CODE_FAILED;
     }
     for (uint32_t i = 0; i < data->metric_response_len; i++) {
         const struct QcPerfMetricResponse* r = &data->metric_response[i];
-        if (r->metric_id >= METRIC_COUNT) {
+        if (r->metric_id >= g_acc.metric_count) {
             continue;
         }
         if (r->metric_value.data_type != QC_PERF_DATA_TYPE_DOUBLE) {
             continue;
         }
-        if (g_seen[r->metric_id]++ < WARMUP_SAMPLES) {
+        if (g_acc.seen[r->metric_id]++ < g_acc.skip) {
             continue;
         }
-        g_sum[r->metric_id] += r->metric_value.double_value;
-        g_count[r->metric_id]++;
+        g_acc.sum[r->metric_id] += r->metric_value.double_value;
+        g_acc.count[r->metric_id]++;
     }
     return QC_PERF_RETURN_CODE_SUCCESS;
 }
-
-static enum QcPerfReturnCode message_callback(struct QcPerfMessage* message);
-
-#ifdef QCPERF_ENABLED_QCOM_LINUX_GPU
-#define GPU_METRIC_COUNT LINUX_GPU_CAPABILITY_0_METRIC_COUNT
-
-static double g_gpu_sum[GPU_METRIC_COUNT];
-static unsigned long g_gpu_count[GPU_METRIC_COUNT];
-
-static const char* const GPU_METRIC_KEY[GPU_METRIC_COUNT] = {
-    [LINUX_GPU_METRIC_UTILIZATION] = "GPU_UTIL",      /* % */
-    [LINUX_GPU_METRIC_CLOCK]       = "GPU_CLOCK_MHZ", /* MHz */
-};
-
-static enum QcPerfReturnCode gpu_data_callback(struct QcPerfData* data) {
-    if (NULL == data || NULL == data->metric_response) {
-        return QC_PERF_RETURN_CODE_FAILED;
-    }
-    for (uint32_t i = 0; i < data->metric_response_len; i++) {
-        const struct QcPerfMetricResponse* r = &data->metric_response[i];
-        if (r->metric_id >= GPU_METRIC_COUNT || r->metric_value.data_type != QC_PERF_DATA_TYPE_DOUBLE) {
-            continue;
-        }
-        g_gpu_sum[r->metric_id] += r->metric_value.double_value;
-        g_gpu_count[r->metric_id]++;
-    }
-    return QC_PERF_RETURN_CODE_SUCCESS;
-}
-
-/* The GPU is an add-on to the NPU reading: if it cannot be monitored, say so
-   on stderr and keep going rather than failing the NPU sample. */
-static bool gpu_start(struct QcPerfRequest* request) {
-    bool ok = false;
-
-    if (QC_PERF_RETURN_CODE_SUCCESS != qcperf_connect_backend(QC_PERF_BACKEND_QCOM_LINUX_GPU, message_callback)) {
-        fprintf(stderr, "[qcperf] GPU unavailable, reporting NPU only\n");
-    } else if (QC_PERF_RETURN_CODE_SUCCESS != qcperf_set_data_callback(QC_PERF_BACKEND_QCOM_LINUX_GPU, gpu_data_callback) ||
-               QC_PERF_RETURN_CODE_SUCCESS != qcperf_start(QC_PERF_BACKEND_QCOM_LINUX_GPU, request)) {
-        fprintf(stderr, "[qcperf] GPU start failed, reporting NPU only\n");
-        qcperf_disconnect_backend(QC_PERF_BACKEND_QCOM_LINUX_GPU);
-    } else {
-        ok = true;
-    }
-    return ok;
-}
-
-static void gpu_stop(struct QcPerfRequest* request) {
-    qcperf_stop(QC_PERF_BACKEND_QCOM_LINUX_GPU, request);
-    qcperf_disconnect_backend(QC_PERF_BACKEND_QCOM_LINUX_GPU);
-}
-
-static void gpu_print(void) {
-    for (int m = 0; m < GPU_METRIC_COUNT; m++) {
-        if (g_gpu_count[m] > 0) {
-            printf("%s=%.4f\n", GPU_METRIC_KEY[m], g_gpu_sum[m] / (double)g_gpu_count[m]);
-        }
-    }
-}
-#endif /* QCPERF_ENABLED_QCOM_LINUX_GPU */
 
 static enum QcPerfReturnCode message_callback(struct QcPerfMessage* message) {
     /* Only surface real problems; INFO/DEBUG would pollute the KEY=VALUE output. */
@@ -129,120 +91,229 @@ static enum QcPerfReturnCode message_callback(struct QcPerfMessage* message) {
     return QC_PERF_RETURN_CODE_SUCCESS;
 }
 
-static void usage(const char* argv0) {
-    fprintf(stderr,
-        "Usage: %s <npu_index> <profile_seconds> [sampling_rate_ms]\n"
-        "  Also reports GPU_UTIL / GPU_CLOCK_MHZ when the GPU backend is built in.\n"
-        "  npu_index         0 = NPU0 (cdsp), 1 = NPU1 (cdsp1)\n"
-        "  profile_seconds   averaging window, >= 1\n"
-        "  sampling_rate_ms  one of 1, 5, 10, 50, 100, 200 (default 200)\n",
-        argv0);
+/* Sample one backend for `seconds` and leave the averages in g_acc. Returns
+   true when the window was sampled; whether any readings arrived is for the
+   caller to check. */
+static bool sample_backend(enum QcPerfBackendId backend, const char* name, int seconds, int sampling_rate) {
+    struct QcPerfRequest request;
+    bool connected = false;
+    bool started   = false;
+    bool ok        = false;
+    enum QcPerfReturnCode rc;
+
+    rc = qcperf_init();
+    if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
+        fprintf(stderr, "[qcperf] %s: qcperf_init failed: %d\n", name, rc);
+        return false;
+    }
+
+    rc = qcperf_connect_backend(backend, message_callback);
+    if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
+        fprintf(stderr, "[qcperf] connect %s failed: %d\n", name, rc);
+    } else {
+        connected = true;
+        rc        = qcperf_set_data_callback(backend, data_callback);
+        if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
+            fprintf(stderr, "[qcperf] %s: set_data_callback failed: %d\n", name, rc);
+        } else {
+            memset(&request, 0, sizeof(request));
+            request.capability_id  = 0;
+            request.sampling_rate  = (uint16_t)sampling_rate;
+            request.streaming_rate = STREAMING_RATE_MS;
+
+            rc = qcperf_start(backend, &request);
+            if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
+                fprintf(stderr, "[qcperf] %s: start failed: %d\n", name, rc);
+            } else {
+                started = true;
+                sleep((unsigned int)seconds);
+                ok = true;
+            }
+        }
+    }
+
+    if (started) {
+        qcperf_stop(backend, &request);
+    }
+    if (connected) {
+        qcperf_disconnect_backend(backend);
+    }
+    qcperf_deinit();
+    return ok;
 }
 
-int main(int argc, char** argv) {
-    int npu_index = 0;
-    int seconds = 0;
-    int sampling_rate = 200;
-    enum QcPerfReturnCode rc;
-    struct QcPerfRequest request;
-    int exit_code = EXIT_FAILURE;
-    bool connected = false;
-    bool started = false;
-#ifdef QCPERF_ENABLED_QCOM_LINUX_GPU
-    bool gpu_started = false;
-#endif
+/* Write one backend's averages as "<prefix>KEY=VALUE" lines. */
+static void format_averages(FILE* out, const char* prefix, const char* const* keys, uint32_t metric_count) {
+    for (uint32_t m = 0; m < metric_count; m++) {
+        if (g_acc.count[m] > 0) {
+            fprintf(out, "%s%s=%.4f\n", prefix, keys[m], g_acc.sum[m] / (double)g_acc.count[m]);
+        }
+    }
+}
 
-    if (argc < 3 || argc > 4) {
-        usage(argv[0]);
-        return EXIT_FAILURE;
-    }
-    npu_index = atoi(argv[1]);
-    seconds = atoi(argv[2]);
-    if (argc == 4) {
-        sampling_rate = atoi(argv[3]);
-    }
-    if ((npu_index != 0 && npu_index != 1) || seconds < 1) {
-        usage(argv[0]);
-        return EXIT_FAILURE;
-    }
+/* Body of one NPU child: sample the NPU and write its lines to `out`.
+   Returns the child's exit status. */
+static int run_npu_child(int npu_index, int seconds, int sampling_rate, FILE* out) {
+    char name[16];
+    char prefix[16];
 
-    rc = qcperf_dsp_npu_select((unsigned int)npu_index);
-    if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
+    snprintf(name, sizeof(name), "NPU%d", npu_index);
+    snprintf(prefix, sizeof(prefix), "NPU%d_", npu_index);
+
+    if (qcperf_dsp_npu_select((unsigned int)npu_index) != QC_PERF_RETURN_CODE_SUCCESS) {
         fprintf(stderr, "[qcperf] invalid npu_index %d\n", npu_index);
         return EXIT_FAILURE;
     }
 
-    rc = qcperf_init();
-    if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf] qcperf_init failed: %d\n", rc);
+    g_acc.metric_count = METRIC_COUNT;
+    g_acc.skip         = WARMUP_SAMPLES;
+    if (!sample_backend(QC_PERF_BACKEND_DSP_NPU, name, seconds, sampling_rate)) {
+        return EXIT_FAILURE;
+    }
+    if (g_acc.count[0] == 0) {
+        fprintf(stderr, "[qcperf] no samples collected for %s (need more than %d; try a longer window)\n", name, WARMUP_SAMPLES);
         return EXIT_FAILURE;
     }
 
-    rc = qcperf_connect_backend(QC_PERF_BACKEND_DSP_NPU, message_callback);
-    if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf] connect NPU%d failed: %d\n", npu_index, rc);
-        goto cleanup;
-    }
-    connected = true;
-
-    rc = qcperf_set_data_callback(QC_PERF_BACKEND_DSP_NPU, data_callback);
-    if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf] set_data_callback failed: %d\n", rc);
-        goto cleanup;
-    }
-
-    memset(&request, 0, sizeof(request));
-    request.capability_id = 0;
-    request.sampling_rate = (uint16_t)sampling_rate;
-    request.streaming_rate = 1000;
-
-    rc = qcperf_start(QC_PERF_BACKEND_DSP_NPU, &request);
-    if (rc != QC_PERF_RETURN_CODE_SUCCESS) {
-        fprintf(stderr, "[qcperf] start failed: %d "
-                        "(sampling_rate must be 1/5/10/50/100/200)\n", rc);
-        goto cleanup;
-    }
-    started = true;
+    format_averages(out, prefix, METRIC_KEY, METRIC_COUNT);
+    fprintf(out, "%sSAMPLES=%lu\n", prefix, g_acc.count[0]);
+    return EXIT_SUCCESS;
+}
 
 #ifdef QCPERF_ENABLED_QCOM_LINUX_GPU
-    gpu_started = gpu_start(&request);
-#endif
+static const char* const GPU_METRIC_KEY[LINUX_GPU_CAPABILITY_0_METRIC_COUNT] = {
+    [LINUX_GPU_METRIC_UTILIZATION] = "GPU_UTIL",      /* % */
+    [LINUX_GPU_METRIC_CLOCK]       = "GPU_CLOCK_MHZ", /* MHz */
+};
 
-    sleep((unsigned int)seconds);
+/* The GPU is reported on a best-effort basis: if it cannot be monitored, say
+   so on stderr and leave its keys out rather than failing the NPU readings. */
+static void run_gpu(int seconds, int sampling_rate, char* out, size_t out_size) {
+    FILE* fp = fmemopen(out, out_size, "w");
 
-    exit_code = EXIT_SUCCESS;
-
-cleanup:
-#ifdef QCPERF_ENABLED_QCOM_LINUX_GPU
-    if (gpu_started) {
-        gpu_stop(&request);
+    g_acc.metric_count = LINUX_GPU_CAPABILITY_0_METRIC_COUNT;
+    g_acc.skip         = 0;
+    if (NULL == fp) {
+        fprintf(stderr, "[qcperf] GPU: cannot buffer output\n");
+    } else if (sample_backend(QC_PERF_BACKEND_QCOM_LINUX_GPU, "GPU", seconds, sampling_rate)) {
+        format_averages(fp, "", GPU_METRIC_KEY, LINUX_GPU_CAPABILITY_0_METRIC_COUNT);
+    } else {
+        fprintf(stderr, "[qcperf] GPU unavailable, reporting NPU only\n");
     }
-#endif
-    if (started) {
-        qcperf_stop(QC_PERF_BACKEND_DSP_NPU, &request);
+    if (NULL != fp) {
+        fclose(fp);
     }
-    if (connected) {
-        qcperf_disconnect_backend(QC_PERF_BACKEND_DSP_NPU);
-    }
-    qcperf_deinit();
+}
+#endif /* QCPERF_ENABLED_QCOM_LINUX_GPU */
 
-    if (exit_code == EXIT_SUCCESS) {
-        if (g_count[0] == 0) {
-            fprintf(stderr, "[qcperf] no samples collected for NPU%d "
-                            "(need more than %d; try a longer window)\n",
-                    npu_index, WARMUP_SAMPLES);
-            return EXIT_FAILURE;
+static bool sampling_rate_valid(int rate) {
+    for (size_t i = 0; i < sizeof(SAMPLING_RATES_MS) / sizeof(SAMPLING_RATES_MS[0]); i++) {
+        if ((int)SAMPLING_RATES_MS[i] == rate) {
+            return true;
         }
-        printf("NPU_INDEX=%d\n", npu_index);
-        for (int m = 0; m < METRIC_COUNT; m++) {
-            if (g_count[m] > 0) {
-                printf("%s=%.4f\n", METRIC_KEY[m], g_sum[m] / (double)g_count[m]);
+    }
+    return false;
+}
+
+static void usage(const char* argv0) {
+    fprintf(stderr,
+        "Usage: %s <profile_seconds> [sampling_rate_ms]\n"
+        "  Samples NPU0, NPU1 and the GPU over the same window and prints every\n"
+        "  metric as a KEY=VALUE line (NPU0_*, NPU1_*, GPU_*).\n"
+        "  profile_seconds   averaging window, >= 1\n"
+        "  sampling_rate_ms  one of 1, 5, 10, 50, 100, 200 (default %d)\n",
+        argv0, DEFAULT_SAMPLING_RATE_MS);
+}
+
+/* Fork one child per NPU. Each child writes its lines into its own pipe. */
+static bool spawn_npu_children(int seconds, int sampling_rate, pid_t pids[NPU_COUNT], int read_fds[NPU_COUNT]) {
+    for (int npu = 0; npu < NPU_COUNT; npu++) {
+        int fds[2];
+
+        if (pipe(fds) != 0) {
+            perror("[qcperf] pipe");
+            return false;
+        }
+        pids[npu] = fork();
+        if (pids[npu] < 0) {
+            perror("[qcperf] fork");
+            close(fds[0]);
+            close(fds[1]);
+            return false;
+        }
+        if (pids[npu] == 0) {
+            FILE* out = fdopen(fds[1], "w");
+            int rc;
+
+            close(fds[0]);
+            for (int prev = 0; prev < npu; prev++) {
+                close(read_fds[prev]);
             }
+            rc = (NULL == out) ? EXIT_FAILURE : run_npu_child(npu, seconds, sampling_rate, out);
+            if (NULL != out) {
+                fclose(out);
+            }
+            _exit(rc);
         }
-        printf("SAMPLES=%lu\n", g_count[0]);
-#ifdef QCPERF_ENABLED_QCOM_LINUX_GPU
-        gpu_print();
-#endif
+        close(fds[1]);
+        read_fds[npu] = fds[0];
     }
+    return true;
+}
+
+/* Copy everything the child wrote to stdout, then reap it. Returns whether the
+   child exited cleanly. */
+static bool collect_npu_child(pid_t pid, int read_fd) {
+    char buf[OUTPUT_MAX];
+    ssize_t n;
+    int status = 0;
+
+    while ((n = read(read_fd, buf, sizeof(buf))) > 0) {
+        fwrite(buf, 1, (size_t)n, stdout);
+    }
+    close(read_fd);
+    if (waitpid(pid, &status, 0) < 0) {
+        return false;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS;
+}
+
+int main(int argc, char** argv) {
+    int seconds       = 0;
+    int sampling_rate = DEFAULT_SAMPLING_RATE_MS;
+    pid_t pids[NPU_COUNT];
+    int read_fds[NPU_COUNT];
+    int exit_code = EXIT_SUCCESS;
+    char gpu_out[OUTPUT_MAX] = {0};
+
+    if (argc < 2 || argc > 3) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+    seconds = atoi(argv[1]);
+    if (argc == 3) {
+        sampling_rate = atoi(argv[2]);
+    }
+    if (seconds < 1 || !sampling_rate_valid(sampling_rate)) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    /* Fork before libqcperf starts any thread in this process. */
+    if (!spawn_npu_children(seconds, sampling_rate, pids, read_fds)) {
+        return EXIT_FAILURE;
+    }
+
+#ifdef QCPERF_ENABLED_QCOM_LINUX_GPU
+    run_gpu(seconds, sampling_rate, gpu_out, sizeof(gpu_out));
+#endif
+
+    for (int npu = 0; npu < NPU_COUNT; npu++) {
+        if (!collect_npu_child(pids[npu], read_fds[npu])) {
+            fprintf(stderr, "[qcperf] NPU%d sampling failed\n", npu);
+            exit_code = EXIT_FAILURE;
+        }
+    }
+    fputs(gpu_out, stdout);
     return exit_code;
 }
