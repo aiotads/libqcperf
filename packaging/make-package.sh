@@ -59,17 +59,15 @@ cmake -S "${SRC_DIR}/qcperf" -B "$BUILD_DIR" "${CMAKE_ARGS[@]}" >/dev/null
 echo "==> Building"
 cmake --build "$BUILD_DIR" -j"$(nproc)" >/dev/null
 
-for tool in qcperf qcperf-gpu; do
-    if [ ! -x "${BUILD_DIR}/${tool}" ]; then
-        echo "Error: ${BUILD_DIR}/${tool} was not built." >&2
-        echo "  The NPU/GPU backend was skipped -- check the configure log above." >&2
-        exit 1
-    fi
-done
+if [ ! -x "${BUILD_DIR}/qcperf" ]; then
+    echo "Error: ${BUILD_DIR}/qcperf was not built." >&2
+    echo "  The NPU/GPU backend was skipped -- check the configure log above." >&2
+    exit 1
+fi
 
 echo "==> Staging"
 install -d "${STAGE_DIR}/${PKG_NAME}/bin" "${STAGE_DIR}/${PKG_NAME}/lib"
-install -m 0755 "${BUILD_DIR}/qcperf" "${BUILD_DIR}/qcperf-gpu" "${STAGE_DIR}/${PKG_NAME}/bin/"
+install -m 0755 "${BUILD_DIR}/qcperf" "${STAGE_DIR}/${PKG_NAME}/bin/"
 install -m 0644 "${BUILD_DIR}/libqcperfCore.so"  "${STAGE_DIR}/${PKG_NAME}/lib/"
 install -m 0755 "${SRC_DIR}/packaging/install.sh" "${STAGE_DIR}/${PKG_NAME}/"
 

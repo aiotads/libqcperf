@@ -38,7 +38,7 @@ fi
 
 echo "==> Installing to ${PREFIX}"
 install -d "${PREFIX}/bin" "${PREFIX}/lib"
-install -m 0755 "${SRC_DIR}/bin/qcperf" "${SRC_DIR}/bin/qcperf-gpu" "${PREFIX}/bin/"
+install -m 0755 "${SRC_DIR}/bin/qcperf" "${PREFIX}/bin/"
 install -m 0644 "${SRC_DIR}/lib/libqcperfCore.so"  "${PREFIX}/lib/"
 
 echo "==> Verifying against NPU0"
@@ -54,9 +54,9 @@ if ! "${PREFIX}/bin/qcperf" 1 2 >/dev/null; then
 fi
 
 echo "==> Verifying GPU"
-if ! "${PREFIX}/bin/qcperf-gpu" 2 >/dev/null; then
-    echo "Error: qcperf-gpu failed. Check that /sys/class/kgsl/kgsl-3d0 exists." >&2
+if ! "${PREFIX}/bin/qcperf" 0 2 2>/dev/null | grep -q '^GPU_UTIL='; then
+    echo "Error: qcperf reported no GPU metrics. Check that /sys/class/kgsl/kgsl-3d0 exists." >&2
     exit 1
 fi
 
-echo "==> Install OK: ${PREFIX}/bin/qcperf, ${PREFIX}/bin/qcperf-gpu"
+echo "==> Install OK: ${PREFIX}/bin/qcperf"
