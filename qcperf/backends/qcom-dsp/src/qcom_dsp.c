@@ -37,6 +37,13 @@
 
 void get_full_uri_info(const char* uri, char* full_uri, int size, enum DspDomainId domain_id);
 
+/* NSP index passed to sysmonquery_*(). The handle is already bound to a
+   specific DSP PD (cdsp / cdsp1), so each NSP is index 0 within its own PD. */
+static unsigned int dsp_npu_index(enum DspDomainId domain_id) {
+    (void)domain_id;
+    return 0u;
+}
+
 static remote_handle64 h[DSP_MAX]                                     = {0};
 static struct sysmon_query_prof_data* sysmon_query_prof_data_ptr[DSP_MAX] = {0};
 
@@ -47,6 +54,8 @@ void get_full_uri_info(const char* uri, char* full_uri, int size, enum DspDomain
         strlcat(full_uri, ADSP_DOMAIN, (size_t)size);
     } else if (domain_id == DSP_NPU0) {
         strlcat(full_uri, CDSP_DOMAIN, (size_t)size);
+    } else if (domain_id == DSP_NPU1) {
+        strlcat(full_uri, CDSP1_DOMAIN, (size_t)size);
     } else {
         memset(full_uri, 0, (size_t)size);
     }
@@ -57,9 +66,9 @@ static enum DspReturnCode set_remote_process_domain(enum fastrpc_process_type pr
     int fastrpc_err = 0;
     struct remote_process_type data = {0};
     enum DspReturnCode return_code = RETURN_CODE_DSP_REMOTE_SESSION_CONTROL_SUCCESS;
-    if (domain_id == DSP_NPU0) {
+    if (domain_id == DSP_NPU0 || domain_id == DSP_NPU1) {
         data.process_type = process_type;
-        data.domain = CDSP_DOMAIN_ID;
+        data.domain = (int)domain_id;
         fastrpc_err = remote_session_control(DSPRPC_CONTROL_UNSIGNED_MODULE, (void*)&data, sizeof(data));
         if (fastrpc_err != 0) {
             return_code = RETURN_CODE_DSP_REMOTE_SESSION_CONTROL_FAILED;
@@ -80,9 +89,7 @@ enum DspReturnCode qcom_dsp_init(enum DspDomainId domain_id) {
 #endif
 
     get_full_uri_info(sysmonquery_URI, full_uri, sizeof(full_uri), domain_id);
-    if (domain_id == DSP_NPU0) {
-        npu_id = 0;
-    }
+    npu_id = dsp_npu_index(domain_id);
 
 #ifdef QCPERF_PLATFORM_WINDOWS
     if (fastrpc_load_symbols(q6Processor, NULL) != 0) {
@@ -140,9 +147,7 @@ struct sysmon_query_prof_data* qcom_dsp_get_prof_data(enum DspDomainId domain_id
     if (no_metrics == NULL) {
         result_ptr = NULL;
     } else {
-        if (domain_id == CDSP_DOMAIN_ID) {
-            npu_id = 0;
-        }
+        npu_id = dsp_npu_index(domain_id);
 
 #ifdef QCPERF_PLATFORM_WINDOWS
         result = sysmonquery_get_profdata(h[domain_id],
@@ -172,9 +177,7 @@ enum DspReturnCode qcom_dsp_deinit(enum DspDomainId domain_id) {
     int q6Processor                = (int)domain_id;
 #endif
 
-    if (domain_id == CDSP_DOMAIN_ID) {
-        npu_id = 0;
-    }
+    npu_id = dsp_npu_index(domain_id);
 
 #ifdef QCPERF_PLATFORM_WINDOWS
     sysmon_query_return_code = sysmonquery_deinit(h[domain_id], npu_id, q6Processor);
