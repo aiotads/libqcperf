@@ -108,7 +108,6 @@ static const struct LinuxThermalPrefix g_temp_prefix[] = {
     {"mdmss", 5, 4},    {"qmx", 3, 5},  {"video", 5, 6},    {"camera", 6, 7},
     {"wireless", 8, 8}, {"usb", 3, 9},  {"sdr", 3, 10},     {"mmw", 3, 11},
     {"pm", 2, 12},      {"sys", 3, 13}, {"battery", 7, 14}, {"socd", 4, 15},
-    {"vbat", 4, 14},  /* battery voltage node -> BATTERY domain (value is mV, not milli-C) */
 };
 
 /* Cooling-device type prefixes -> cooling domain index (len precomputed).
@@ -137,7 +136,8 @@ static int linux_thermal_classify(const char* type, const struct LinuxThermalPre
     // not temperatures, so exclude them from any domain. The "-...-" form is
     // specific to these level nodes and does not match the modem_bcl cooling
     // device (which has no surrounding dashes).
-    if (NULL != strstr(type, "-bcl-") || NULL != strstr(type, "-ibat-")) {
+    if (NULL != strstr(type, LINUX_THERMAL_BCL_EXCLUDE_SUBSTR) || NULL != strstr(type, LINUX_THERMAL_IBAT_EXCLUDE_SUBSTR) ||
+        0 == strncmp(type, LINUX_THERMAL_VBAT_EXCLUDE_PREFIX, strlen(LINUX_THERMAL_VBAT_EXCLUDE_PREFIX))) {
         return -1;
     }
 
@@ -638,7 +638,7 @@ enum QcPerfReturnCode linux_thermal_lib_discover_thermal_zones(struct LinuxTherm
     uint8_t filled[LINUX_THERMAL_TEMP_DOMAIN_COUNT] = {0};
     unsigned int zone_id                            = 0;
     int idx                                         = -1;
-    uint8_t k                                       = 0;
+    uint8_t slot                                    = 0;
     uint32_t milli_deg_c                            = 0;
 
     if (false == g_is_initialized) {
@@ -675,23 +675,23 @@ enum QcPerfReturnCode linux_thermal_lib_discover_thermal_zones(struct LinuxTherm
                     continue;
                 }
 
-                k = filled[idx];
+                slot = filled[idx];
                 if (NULL != domain[idx]->id) {
-                    domain[idx]->id[k] = (uint8_t)zone_id;
+                    domain[idx]->id[slot] = (uint8_t)zone_id;
                 }
-                if (NULL != domain[idx]->name && NULL != domain[idx]->name[k]) {
-                    snprintf((char*)domain[idx]->name[k], LINUX_THERMAL_ZONE_NAME_MAX_LEN, "%s", type);
+                if (NULL != domain[idx]->name && NULL != domain[idx]->name[slot]) {
+                    snprintf((char*)domain[idx]->name[slot], LINUX_THERMAL_ZONE_NAME_MAX_LEN, "%s", type);
                 }
                 // Open the temp value node once and keep the handle for cheap re-reads.
                 snprintf(path, sizeof(path), LINUX_THERMAL_ZONE_TEMP_NODE_FMT, zone_id);
                 if (NULL != g_temp_node[idx]) {
-                    g_temp_node[idx][k] = fopen(path, "r");
+                    g_temp_node[idx][slot] = fopen(path, "r");
                 }
-                if (NULL != domain[idx]->temp && NULL != g_temp_node[idx] && NULL != g_temp_node[idx][k]) {
+                if (NULL != domain[idx]->temp && NULL != g_temp_node[idx] && NULL != g_temp_node[idx][slot]) {
                     milli_deg_c = 0;
-                    if (true == linux_thermal_read_value_fp(g_temp_node[idx][k], &milli_deg_c)) {
+                    if (true == linux_thermal_read_value_fp(g_temp_node[idx][slot], &milli_deg_c)) {
                         // Store raw milli-degrees Celsius
-                        domain[idx]->temp[k] = milli_deg_c;
+                        domain[idx]->temp[slot] = milli_deg_c;
                     }
                 }
                 filled[idx]++;
@@ -725,7 +725,7 @@ enum QcPerfReturnCode linux_thermal_lib_discover_cooling_devices(struct LinuxThe
     uint8_t filled[LINUX_THERMAL_COOL_DOMAIN_COUNT] = {0};
     unsigned int device_id                          = 0;
     int idx                                         = -1;
-    uint8_t k                                       = 0;
+    uint8_t slot                                    = 0;
     uint32_t cur                                    = 0;
     uint32_t max                                    = 0;
 
@@ -762,22 +762,22 @@ enum QcPerfReturnCode linux_thermal_lib_discover_cooling_devices(struct LinuxThe
                     continue;
                 }
 
-                k = filled[idx];
+                slot = filled[idx];
                 if (NULL != domain[idx]->id) {
-                    domain[idx]->id[k] = (uint8_t)device_id;
+                    domain[idx]->id[slot] = (uint8_t)device_id;
                 }
-                if (NULL != domain[idx]->name && NULL != domain[idx]->name[k]) {
-                    snprintf((char*)domain[idx]->name[k], LINUX_THERMAL_ZONE_NAME_MAX_LEN, "%s", type);
+                if (NULL != domain[idx]->name && NULL != domain[idx]->name[slot]) {
+                    snprintf((char*)domain[idx]->name[slot], LINUX_THERMAL_ZONE_NAME_MAX_LEN, "%s", type);
                 }
                 // Open the cur_state node once and keep the handle for cheap re-reads.
                 snprintf(path, sizeof(path), LINUX_THERMAL_COOLING_DEVICE_CUR_STATE_NODE_FMT, device_id);
                 if (NULL != g_cool_node[idx]) {
-                    g_cool_node[idx][k] = fopen(path, "r");
+                    g_cool_node[idx][slot] = fopen(path, "r");
                 }
-                if (NULL != domain[idx]->cur_state && NULL != g_cool_node[idx] && NULL != g_cool_node[idx][k]) {
+                if (NULL != domain[idx]->cur_state && NULL != g_cool_node[idx] && NULL != g_cool_node[idx][slot]) {
                     cur = 0;
-                    if (true == linux_thermal_read_value_fp(g_cool_node[idx][k], &cur)) {
-                        domain[idx]->cur_state[k] = (uint8_t)cur;
+                    if (true == linux_thermal_read_value_fp(g_cool_node[idx][slot], &cur)) {
+                        domain[idx]->cur_state[slot] = (uint8_t)cur;
                     }
                 }
                 // max_state is a constant device capability: read it once here.
@@ -785,7 +785,7 @@ enum QcPerfReturnCode linux_thermal_lib_discover_cooling_devices(struct LinuxThe
                     max = 0;
                     snprintf(path, sizeof(path), LINUX_THERMAL_COOLING_DEVICE_MAX_STATE_NODE_FMT, device_id);
                     if (true == linux_thermal_read_value(path, &max)) {
-                        domain[idx]->max_state[k] = (uint8_t)max;
+                        domain[idx]->max_state[slot] = (uint8_t)max;
                     }
                 }
                 filled[idx]++;

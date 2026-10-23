@@ -98,6 +98,15 @@
 /** Conversion factor from milli-degrees Celsius to degrees Celsius */
 #define LINUX_THERMAL_MILLIDEG_PER_DEG 1000.0
 
+/** Substring in PMIC zone types for battery-current-limit level nodes (excluded from classification) */
+#define LINUX_THERMAL_BCL_EXCLUDE_SUBSTR "-bcl-"
+
+/** Substring in PMIC zone types for battery-current level nodes (excluded from classification) */
+#define LINUX_THERMAL_IBAT_EXCLUDE_SUBSTR "-ibat-"
+
+/** Prefix for battery-voltage zones (report mV, not temperature); excluded from classification */
+#define LINUX_THERMAL_VBAT_EXCLUDE_PREFIX "vbat"
+
 /**
  * @struct LinuxThermalTempData
  * @brief Per-domain temperature readings for one logical thermal domain
@@ -116,7 +125,7 @@ struct LinuxThermalTempData {
     uint8_t len;    /**< Number of valid entries in id[]/name[]/temp[] */
 };
 
-/**
+/*
  * @struct LinuxThermalTempMetrics
  * @brief Per-domain view of the raw thermal-zone temperatures
  *
