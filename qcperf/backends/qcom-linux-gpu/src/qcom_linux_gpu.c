@@ -294,7 +294,7 @@ static enum QcPerfReturnCode qcom_linux_gpu_start(struct QcPerfRequest* request)
     } else if (NULL == g_data_callback) {
         SEND_MESSAGE(QC_PERF_MESSAGE_LEVEL_ERROR, "Data callback is not set");
         ret = QC_PERF_RETURN_CODE_FAILED;
-    } else if (g_is_thread_running) {
+    } else if (NULL != g_thread_info.thread_handle) {
         SEND_MESSAGE(QC_PERF_MESSAGE_LEVEL_WARNING, "Performance monitoring thread is already running");
         ret = QC_PERF_RETURN_CODE_ALREADY_INITIALIZED;
     } else {
@@ -321,11 +321,19 @@ static enum QcPerfReturnCode qcom_linux_gpu_stop(struct QcPerfRequest* request) 
 
     if (NULL == request) {
         ret = QC_PERF_RETURN_CODE_NULL_POINTER;
-    } else if (g_is_thread_running) {
+    } else if (NULL != g_thread_info.thread_handle) {
+        /* The sampling thread may have exited on its own (allocation failure), so
+         * ownership follows the handle, not g_is_thread_running. */
         g_is_thread_running = false;
 
-        if (RET_QTHREAD_JOIN_SUCCESS != thread_join(&g_thread_info) || RET_QTHREAD_DESTROY_SUCCESS != thread_destroy(&g_thread_info)) {
-            SEND_MESSAGE(QC_PERF_MESSAGE_LEVEL_ERROR, "Failed to stop performance monitoring thread");
+        if (RET_QTHREAD_JOIN_SUCCESS != thread_join(&g_thread_info)) {
+            SEND_MESSAGE(QC_PERF_MESSAGE_LEVEL_ERROR, "Failed to join performance monitoring thread");
+            ret = QC_PERF_RETURN_CODE_FAILED;
+        }
+
+        /* Always release the handle, even when the join failed. */
+        if (RET_QTHREAD_DESTROY_SUCCESS != thread_destroy(&g_thread_info)) {
+            SEND_MESSAGE(QC_PERF_MESSAGE_LEVEL_ERROR, "Failed to destroy performance monitoring thread");
             ret = QC_PERF_RETURN_CODE_FAILED;
         }
     }
