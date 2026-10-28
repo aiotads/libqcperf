@@ -241,7 +241,7 @@ QcPerfCoreTest <backend_id> <sampling_rate_ms> <streaming_rate_ms> <verbose>
 
 | Argument | Description |
 |----------|-------------|
-| `backend_id` | Numeric backend to connect to: `0` = DUMMY, `1` = CPU, `2` = NPU, `6` = GPU |
+| `backend_id` | Numeric backend to connect to: `0` = DUMMY, `1` = CPU, `2` = NPU, `7` = GPU |
 | `sampling_rate_ms` | Sampling rate in milliseconds |
 | `streaming_rate_ms` | Streaming (callback) rate in milliseconds |
 | `verbose` | `0` = off, `1` = on |
