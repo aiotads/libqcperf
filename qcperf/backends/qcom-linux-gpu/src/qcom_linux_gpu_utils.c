@@ -41,7 +41,7 @@ static enum QcPerfReturnCode read_sysfs_value(const char* sysfs_root, const char
     char path[256];
     FILE* fp = NULL;
 
-    if (NULL == sysfs_root || NULL == value) {
+    if (NULL == sysfs_root || NULL == value || NULL == node) {
         ret = QC_PERF_RETURN_CODE_NULL_POINTER;
     } else if (snprintf(path, sizeof(path), "%s/%s", sysfs_root, node) < (int)sizeof(path)) {
         fp = fopen(path, "r");
